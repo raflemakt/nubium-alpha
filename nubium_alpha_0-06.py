@@ -2,36 +2,21 @@
 import curses
 from curses import textpad
 import time
+import requests
 
 """TODO:
 liste av med OEIS i faktorgraf, med forskjellige lister = l
-bruk primtalslista i faktorgraf "m"
 fikse transparent i svært_tal()
-FIKSE NY FAKTORFUNKSJON
 legge til beskrivelse og legend til venstre for null i f.graf
 Last ned divisorplot.com før den forsvinner
 primtalsmodus for f.graf
 modus i f.graf for å fjerne tosifra tal (vis kun siste siffer)
 """
 
-menu = ["Faktorgraf", "Vis Primtalsliste", "Gongetabell", "Info", "Quit"]
+menu = ["Faktorgraf", "Vis Primtalsliste", "Gongetabell", "OEIS-Utforskar", "Quit"]
 høgkompositt = [1,2,4,6,12,24,36,48,60,120,180,240,360,720,840,
  1260,1680,2520,5040,7560,10080,15120,20160,25200,221760,277200,332640,498960,554400,665280,720720,
  1081080,1441440,2162160]
-
-def erathostenes(limit):
-    n = limit + 1
-    sieve = []
-    primtal = []
-    starttime = time.time()
-    for i in range(2, n):
-        if i not in sieve:
-            primtal.append(i)
-            for j in range(i*i, n, i):
-                sieve.append(j)
-    endtime = time.time()
-    elap = round((endtime - starttime), 2)
-    return primtal, limit, elap
 
 def sieveprime(n):
     """overlegen"""
@@ -61,17 +46,77 @@ def tau(n):
     if sqroot*sqroot == n: t = t - 1 # if sqroot is a factor then we counted it twice, so subtract 1
     return t
 
-def OEIS_liste_temp(stdscr, y, x):
-    #bruk WASD for å manøvrere lista/infoen.
-    #kanskje ha legend her
+def string_findstrip(string, start, start_offset, end, removemode=False):
+    """Returns the string between characters 'start' and 'end' """
+    if removemode:
+        start_marker = string.find(start)
+        beginning = string[:start_marker]
+        end_marker = string.find(end)
+        end = string[end_marker+start_offset:]
+        string = beginning+end
+        return string
+    start_marker = string.find(start)
+    string = string[start_marker+start_offset:]
+    end_marker = string.find(end)
+    string = string[:end_marker].replace("\n", "")
+    return string
+
+def get_OEIS_seq(A):
+    r = requests.get("https://oeis.org/search?q=id:"+A+"&fmt=text")
+    string = r.text
+    ID = string_findstrip(string, "%N", 11, "%C")
+    IDfix = ID.find("%D")
+    IDfix2 = ID.find("%H")
+    if IDfix != -1:
+        ID = ID[:IDfix]
+    if IDfix2 != -1:
+        ID = ID[:IDfix2]
+    seq = string_findstrip(string, "%S", 11, "%N")
+    if seq.find("%T") != -1:
+        if seq.find("%U") != -1:
+            seq = string_findstrip(seq, "%T", 11, "%U", True)
+        else:
+            seq = string_findstrip(seq, "%T", 11, "%N", True)
+    return ID, seq
+
+def OEIS_menu(stdscr):
+    stdscr.clear()
     h, w = stdscr.getmaxyx()
-    liste_h = h - y - 2
-    stdscr.border(0)
-    listeboks = stdscr.subwin(20,20,5,5)
-    listeboks.bkgd(" ", curses.color_pair(1))
-    listeboks.box()
-    listeboks.refresh()
-    #textpad.rectangle(stdscr, 5, 4, liste_h + y, 22)
+    longstep = 10
+    COUNTER = 2182
+
+    while True:
+        h, w = stdscr.getmaxyx()
+        stdscr.erase()
+
+        A = "A"+str((5-len(str(COUNTER)))*"0")+str(COUNTER)
+        stdscr.addstr(0, 0, A)
+        try:
+            ID, seq = get_OEIS_seq(A)
+            stdscr.addstr(1, 0, ID)
+            stdscr.addstr(7, 0, seq)
+        except:
+            errmsg = "Request function threw an exception. Check internet connection of report bug to github issue tracker"
+            stdscr.addstr(3, 0, errmsg)
+
+        key = stdscr.getch()
+        if key == curses.KEY_LEFT:
+            if COUNTER > 0 - w//2:
+                COUNTER -= 1
+        elif key == curses.KEY_RIGHT:
+                COUNTER += 1
+        #shift
+        if key == curses.KEY_SLEFT:
+            if COUNTER <  0 - w//2 + longstep:
+                COUNTER = 0 - w//2
+            else:
+                COUNTER -= longstep
+
+        elif key == curses.KEY_SRIGHT:
+                COUNTER += longstep
+
+        elif key == curses.KEY_ENTER or key in [10, 13] or key == ord("q"):
+            return COUNTER + w//2
 
 def OEIS_liste(stdscr, y, x):
     #bruk WASD for å manøvrere lista/infoen.
@@ -113,22 +158,32 @@ def faktorgraf(stdscr, COUNTER, show_marker):
         #grafen (kvit)
         for i in range(0, h-2): # høgda
             num = str(i+1) #det som printast
-            row = i + 1
-            if prime_mode:
-                i = int(primtal[i])
-                num = str(i)
     
             #find offsets
             offs = 0
-            for off in range(0, w-2):
-                if int(user_offset + off) % (i+1 - 1*prime_mode) == 0:
-                    offs = off
-                    break
-            for j in range(0, w-2-offs, i+1): #bredda
-                if j >= 0:
-                    stdscr.addstr(row+1, j+offs, num)
-                    if show_marker and int(j+offs) == w//2:
-                        stdscr.addstr(row+1, w//2, num, curses.color_pair(1))
+            if prime_mode == False:
+                for off in range(0, w-2):
+                    if int(user_offset + off) % (i+1) == 0:
+                        offs = off
+                        break
+                for j in range(0, w-2-offs, i+1): #bredda
+                    if j >= 0:
+                        stdscr.addstr(i + 2, j+offs, num)
+                        if show_marker and int(j+offs) == w//2:
+                            stdscr.addstr(i + 2, w//2, num, curses.color_pair(1))
+
+            if prime_mode:
+                prim = int(primtal[i])
+                num = str(prim)
+                for off in range(0, w-2):
+                    if int(user_offset + off) % prim == 0:
+                        offs = off
+                        break
+                for j in range(0, w-3-offs, prim): #bredda
+                    if j >= 0:
+                        stdscr.addstr(i+2, j+offs, num)
+                        if show_marker and int(j+offs) == w//2:
+                            stdscr.addstr(i+2, w//2, num, curses.color_pair(1))
         
         #primtal P, kvadrattal K, tau-markør tau(n)=
         if show_marker:
@@ -163,26 +218,26 @@ def faktorgraf(stdscr, COUNTER, show_marker):
         stdscr.addstr(h-1, w-len(bunn_r)-1, bunn_r, curses.color_pair(1))
 
         key = stdscr.getch()
-        if key == curses.KEY_LEFT:
+        if key == curses.KEY_LEFT or key == ord("h"):
             if user_offset > 0 - w//2:
                 user_offset -= 1
-        elif key == curses.KEY_RIGHT:
+        elif key == curses.KEY_RIGHT or key == ord("l"):
                 user_offset += 1
         #shift
-        if key == curses.KEY_SLEFT:
+        if key == curses.KEY_SLEFT or key == ord("H"):
             if user_offset <  0 - w//2 + longstep:
                 user_offset = 0 - w//2
             else:
                 user_offset -= longstep
 
-        elif key == curses.KEY_SRIGHT:
+        elif key == curses.KEY_SRIGHT or key == ord ("L"):
                 user_offset += longstep
 
         elif key == ord('m'):
             show_marker ^= True #XOR-operator
         elif key == ord('p'):
             prime_mode ^= True
-        elif key == ord('l'):
+        elif key == ord('o'):
             show_liste ^= True
         elif key == curses.KEY_ENTER or key in [10, 13] or key == ord("q"):
             return user_offset + w//2
@@ -348,24 +403,24 @@ def main(stdscr):
         key = stdscr.getch()
         char = chr(key)
 
-        if key == curses.KEY_RIGHT:
+        if key == curses.KEY_RIGHT or key == ord("l"):
             COUNTER += 1
             tal_str = str(int(tal_str) + 1)
-        elif key == curses.KEY_SRIGHT:
+        elif key == curses.KEY_SRIGHT or key == ord("L"):
             COUNTER += 10
             tal_str = str(int(tal_str) + 10)
-        elif key == curses.KEY_LEFT:
+        elif key == curses.KEY_LEFT or key == ord("h"):
             if COUNTER >= 1:
                 COUNTER -= 1
                 tal_str = str(int(tal_str) - 1)
-        elif key == curses.KEY_SLEFT:
+        elif key == curses.KEY_SLEFT or key == ord("H"):
             if COUNTER <= 10:
                 COUNTER = 0
                 tal_str = str(0)
             else:
                 COUNTER -= 10
                 tal_str = str(int(tal_str) - 10)
-        elif key == 127:
+        elif key == 127 or key == ord("x"):
             if len(tal_str) > 1:
                 tal_str = tal_str[:-1]
             else:
@@ -379,9 +434,9 @@ def main(stdscr):
             tal_str = tal_str + char
 
 
-        elif key == curses.KEY_UP and current_row_idx > 0:
+        elif (key == curses.KEY_UP or key == ord("k")) and current_row_idx > 0:
             current_row_idx -= 1
-        elif key == curses.KEY_DOWN and current_row_idx < len(menu) - 1:
+        elif (key == curses.KEY_DOWN or key == ord("j")) and current_row_idx < len(menu) - 1:
             current_row_idx += 1
         elif key == ord('q'):
             break
@@ -404,7 +459,7 @@ def main(stdscr):
                 gongetabell(stdscr)
             elif current_row_idx == 3:
                 # "info"
-                pass
+                OEIS_menu(stdscr)
             elif current_row_idx == len(menu) - 1:
                 break
 
@@ -414,7 +469,7 @@ starttime = time.time()
 primtal = sieveprime(primtal_limit)
 primtal_len = len(primtal)
 endtime = time.time()
-elap = starttime - endtime
+elap = endtime - starttime
 streng = ("Fann " + str(len(primtal)) + " primtal under " + str(primtal_limit) +
     ", brukte " + str(elap) + " sekunder.")
 primtalstr = str(primtal).strip('[]')
